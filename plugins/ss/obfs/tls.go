@@ -33,7 +33,6 @@ func NewTLS(params map[string]string) (HandleFunc, error) {
 			host:     host,
 		}
 		return t, nil
-		//return NewTLSObfs(sc, host), nil
 	}, nil
 }
 
