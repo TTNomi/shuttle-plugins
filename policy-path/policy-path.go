@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/md5"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -15,7 +16,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pkg/errors"
 	"github.com/sipt/shuttle/dns"
 	"github.com/sipt/shuttle/group"
 	"github.com/sipt/shuttle/server"
@@ -23,9 +23,9 @@ import (
 )
 
 const (
-	TypDler = "dler-ss"
+	TypDler = "include"
 
-	ParamsKeyExpireSec   = "expire_sec"
+	ParamsKeyExpire      = "expire"
 	ParamsKeyInternalTyp = "internal_typ"
 	ParamsKeyTestURI     = "test_url"
 	ParamsKeyAPIPath     = "api_path"
@@ -39,7 +39,13 @@ func init() {
 	group.Register(TypDler, newDlerGroup)
 }
 
+func ApplyConfig(_ map[string]string) error {
+	return nil
+}
+
 func newDlerGroup(ctx context.Context, name string, params map[string]string, dnsHandle dns.Handle) (g group.IGroup, err error) {
+	logrus.WithField("type", TypDler).WithField("group", name).Info("loading ...")
+	defer logrus.WithField("type", TypDler).WithField("group", name).Info("load success")
 	dg := &dlerGroup{
 		RWMutex:   &sync.RWMutex{},
 		dnsHandle: dnsHandle,
@@ -47,43 +53,43 @@ func newDlerGroup(ctx context.Context, name string, params map[string]string, dn
 	internalTyp := params[ParamsKeyInternalTyp]
 	dg.IGroup, err = group.Get(ctx, internalTyp, name, params, dnsHandle)
 	if err != nil {
-		return nil, errors.Errorf("[group:%s] init failed: %s", name, err.Error())
+		return nil, fmt.Errorf("[group:%s] init failed: %s", name, err.Error())
 	}
 	if dg.testUrl == "" {
 		dg.testUrl = DefaultTestURL
 	} else if testUrl, err := url.Parse(dg.testUrl); err != nil || len(testUrl.Scheme) == 0 || len(testUrl.Hostname()) == 0 {
-		err = errors.Errorf("[group: %s] [%s: %s] is invalid", name, ParamsKeyTestURI, dg.testUrl)
+		err = fmt.Errorf("[group: %s] [%s: %s] is invalid", name, ParamsKeyTestURI, dg.testUrl)
 		return nil, err
 	}
 	api := params[ParamsKeyAPIPath]
 	if len(api) == 0 {
-		return nil, errors.Errorf("[group: %s] api path is empty", name)
+		return nil, fmt.Errorf("[group: %s] api path is empty", name)
 	}
 	method := params[ParamsKeyAPIMethod]
 	if len(method) == 0 {
 		method = http.MethodGet
 	}
 	// 超时更新时间（秒）
-	expireSecStr := params[ParamsKeyExpireSec]
-	var expireSec = DefaultExpireSec
+	expireSecStr := params[ParamsKeyExpire]
+	var expire time.Duration
 	if len(expireSecStr) > 0 {
-		var sec int
-		sec, err = strconv.Atoi(expireSecStr)
+		expire, err = time.ParseDuration(expireSecStr)
 		if err != nil {
-			return nil, errors.Errorf("[group: %s] expire_sec invalid: %s", name, err.Error())
+			return nil, fmt.Errorf("[group: %s] [expire: %s] invalid: %s", name, expireSecStr, err.Error())
 		}
-		expireSec = time.Duration(sec) * time.Second
+	} else {
+		expire = DefaultExpireSec
 	}
 	dg.req, err = http.NewRequest(method, api, nil)
 	if err != nil {
-		return nil, errors.Errorf("[group: %s] make request failed: %s", name, err.Error())
+		return nil, fmt.Errorf("[group: %s] make request failed: %s", name, err.Error())
 	}
 	err = dg.refresh()
 	if err != nil {
-		return nil, errors.Errorf("[group: %s] download server config failed: %s", name, err.Error())
+		return nil, fmt.Errorf("[group: %s] download server config failed: %s", name, err.Error())
 	}
 	go func() {
-		timer := time.NewTimer(expireSec)
+		timer := time.NewTimer(expire)
 		for {
 			select {
 			case <-timer.C:
@@ -95,7 +101,7 @@ func newDlerGroup(ctx context.Context, name string, params map[string]string, dn
 			if err != nil {
 				logrus.Errorf("[group: %s] auto update servers failed: %s", name, err.Error())
 			}
-			timer.Reset(expireSec)
+			timer.Reset(expire)
 		}
 	}()
 	return dg, nil
@@ -115,7 +121,7 @@ func (d *dlerGroup) refresh() error {
 	defer d.Unlock()
 	data, err := downloadGroup(d.req)
 	if err != nil {
-		return errors.Errorf("[%s] download group failed: %s", d.Name(), err.Error())
+		return fmt.Errorf("[%s] download group failed: %s", d.Name(), err.Error())
 	}
 	logrus.WithField("resp", string(data)).Debug("download success")
 	// changes ?
@@ -127,13 +133,13 @@ func (d *dlerGroup) refresh() error {
 	d.hash = newHash
 	items, err := unmarshal(data)
 	if err != nil {
-		return errors.Errorf("[%s] download group failed: %s", d.Name(), err.Error())
+		return fmt.Errorf("[%s] download group failed: %s", d.Name(), err.Error())
 	}
 
 	servers := make([]group.IServerX, 0, len(items))
 	for _, v := range items {
 		s, err := server.Get(v.Type, v.Name, v.Server, v.Port, map[string]string{
-			"obfs":      obfsMap[v.Advanced.Obfs],
+			"obfs":      v.Advanced.Obfs,
 			"obfs-host": v.Advanced.ObfsHost,
 			"method":    v.Cipher,
 			"password":  v.Password,
@@ -182,9 +188,8 @@ func unmarshal(data []byte) ([]*item, error) {
 		l, r = split(r, ',')
 		item.Port, err = strconv.Atoi(strings.TrimSpace(string(l))) // port
 		if err != nil {
-			return nil, errors.Errorf("[server: %s] port to int failed: %s", item.Name, strings.TrimSpace(string(l)))
+			return nil, fmt.Errorf("[server: %s] port to int failed: %s", item.Name, strings.TrimSpace(string(l)))
 		}
-
 		for len(r) > 0 {
 			l, r = split(r, '=')
 			k := strings.TrimSpace(string(l))
@@ -204,12 +209,6 @@ func split(b []byte, flag byte) (left, right []byte) {
 		}
 	}
 	return b, nil
-}
-
-type response struct {
-	Ret  int    `json:"ret"`
-	Msg  string `json:"msg"`
-	Data []item `json:"data"`
 }
 
 type item struct {
@@ -242,7 +241,7 @@ func (i *item) set(k, v string) {
 	}
 }
 
-var obfsMap = map[string]string{
-	"simple_obfs_http": "http",
-	"simple_obfs_tls":  "tls",
+func (i *item) String() string {
+	data, _ := json.Marshal(i)
+	return string(data)
 }

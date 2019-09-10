@@ -1,8 +1,8 @@
 package ssaead
 
 import (
-	"crypto/cipher"
 	"crypto/aes"
+	"crypto/cipher"
 )
 
 func init() {

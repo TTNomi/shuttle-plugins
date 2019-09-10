@@ -2,7 +2,6 @@ package obfs
 
 import (
 	"crypto/tls"
-	"fmt"
 	"math/rand"
 	"time"
 
@@ -84,7 +83,6 @@ func (t *TLS) read(b []byte) (n int, err error) {
 		return 0, err
 	}
 	t.dataSize = int(b[0])<<8 | int(b[1])
-	fmt.Println(t.dataSize)
 	if t.dataSize > 0 {
 		return t.read(b)
 	}

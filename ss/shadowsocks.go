@@ -10,10 +10,10 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sipt/shuttle/conn"
 	"github.com/sipt/shuttle/dns"
+	"github.com/sipt/shuttle/plugins/ss/ciphers"
+	"github.com/sipt/shuttle/plugins/ss/obfs"
 	"github.com/sipt/shuttle/server"
 	"github.com/sirupsen/logrus"
-	"github.com/ttnomi/shuttle-plugins/plugins/ss/ciphers"
-	"github.com/ttnomi/shuttle-plugins/plugins/ss/obfs"
 )
 
 const (
