@@ -61,7 +61,7 @@ func ApplyConfig(_ map[string]string) error {
 
 type ssServer struct {
 	server.IServer // just for not implement: TestRtt
-	rtt map[string]time.Duration
+	rtt            map[string]time.Duration
 	*sync.RWMutex
 	name      string
 	addr      string

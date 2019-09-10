@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"net/http"
 
-	"github.com/pkg/errors"
 	"github.com/sipt/shuttle/conn"
 	"github.com/sipt/shuttle/pkg/pool"
 )
@@ -18,7 +17,7 @@ const (
 	flagFirstWrite = 1
 	flagFirstRead  = 1 << 1
 
-	ObfsHTTPParamsKeyHost   = "http-host"
+	ObfsHTTPParamsKeyHost   = "obfs-host"
 	ObfsHTTPParamsKeyMethod = "http-method"
 )
 
@@ -30,7 +29,7 @@ func init() {
 func NewHTTP(params map[string]string) (HandleFunc, error) {
 	var host, method string
 	if host = params[ObfsHTTPParamsKeyHost]; len(host) == 0 {
-		return nil, errors.Errorf("[obfs-http] params [host] not found")
+		host = DefaultObfsHost
 	}
 	if method = params[ObfsHTTPParamsKeyMethod]; len(method) == 0 {
 		method = http.MethodGet

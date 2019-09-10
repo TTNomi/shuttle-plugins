@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	ObfsTLSParamsKeyHost = "tls-host"
+	ObfsTLSParamsKeyHost = "obfs-host"
 )
 
 func init() {
@@ -25,7 +25,7 @@ func init() {
 func NewTLS(params map[string]string) (HandleFunc, error) {
 	var host string
 	if host = params[ObfsTLSParamsKeyHost]; len(host) == 0 {
-		return nil, errors.Errorf("[obfs-tls] params [host] not found")
+		return nil, errors.Errorf("[obfs-tls] params [obfs-host] not found")
 	}
 	return func(sc conn.ICtxConn) (conn.ICtxConn, error) {
 		t := &TLS{

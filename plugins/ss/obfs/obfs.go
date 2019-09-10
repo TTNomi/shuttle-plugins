@@ -6,6 +6,10 @@ import (
 	"github.com/sipt/shuttle/conn"
 )
 
+const (
+	DefaultObfsHost = "www.bing.com"
+)
+
 type HandleFunc func(conn.ICtxConn) (conn.ICtxConn, error)
 type NewFunc func(map[string]string) (HandleFunc, error)
 

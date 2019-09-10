@@ -3,8 +3,8 @@ package ciphers
 import (
 	"github.com/pkg/errors"
 
-	"github.com/sipt/shuttle/plugins/ss/ciphers/ssaead"
-	"github.com/sipt/shuttle/plugins/ss/ciphers/ssstream"
+	"github.com/ttnomi/shuttle-plugins/plugins/ss/ciphers/ssaead"
+	"github.com/ttnomi/shuttle-plugins/plugins/ss/ciphers/ssstream"
 
 	connpkg "github.com/sipt/shuttle/conn"
 )
