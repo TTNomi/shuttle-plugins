@@ -12,14 +12,14 @@ import (
 type ConnDecorate func(password string, conn connpkg.ICtxConn) (connpkg.ICtxConn, error)
 
 //加密装饰
-func CipherDecorate(password, method string, conn connpkg.ICtxConn) (connpkg.ICtxConn, error) {
+func CipherDecorate(network, password, method string, conn connpkg.ICtxConn) (connpkg.ICtxConn, error) {
 	d := ssstream.GetStreamCiphers(method)
 	if d != nil {
-		return d(password, conn)
+		return d(network, password, conn)
 	}
 	d = ssaead.GetAEADCiphers(method)
 	if d != nil {
-		return d(password, conn)
+		return d(network, password, conn)
 	}
 	return nil, errors.Errorf("[SS Cipher] not support : %s", method)
 }

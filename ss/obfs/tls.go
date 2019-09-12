@@ -2,6 +2,7 @@ package obfs
 
 import (
 	"crypto/tls"
+	"io"
 	"math/rand"
 	"time"
 
@@ -73,12 +74,12 @@ func (t *TLS) read(b []byte) (n int, err error) {
 	}
 	var offset = 3 // type(1B) + ver(2B) = 3B
 	// move offset to length
-	_, err = t.ICtxConn.Read(b[:offset])
+	_, err = io.ReadFull(t.ICtxConn, b[:offset])
 	if err != nil {
 		return 0, err
 	}
 	// read length
-	_, err = t.ICtxConn.Read(b[:2])
+	_, err = io.ReadFull(t.ICtxConn, b[:2])
 	if err != nil {
 		return 0, err
 	}

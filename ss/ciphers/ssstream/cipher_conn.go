@@ -1,11 +1,13 @@
 package ssstream
 
 import (
+	"bytes"
 	"crypto/cipher"
 	"crypto/md5"
 	"crypto/rand"
 	"io"
 
+	"github.com/pkg/errors"
 	"github.com/sipt/shuttle/pkg/pool"
 	"github.com/sirupsen/logrus"
 
@@ -18,25 +20,27 @@ func registerStreamCiphers(method string, c IStreamCipher) {
 	streamCiphers[method] = c
 }
 
-func GetStreamCiphers(method string) func(string, connpkg.ICtxConn) (connpkg.ICtxConn, error) {
+func GetStreamCiphers(method string) func(string, string, connpkg.ICtxConn) (connpkg.ICtxConn, error) {
 	c, ok := streamCiphers[method]
 	if !ok {
 		return nil
 	}
-	return func(password string, conn connpkg.ICtxConn) (connpkg.ICtxConn, error) {
-		iv := make([]byte, c.IVLen())
-		if _, err := io.ReadFull(rand.Reader, iv); err != nil {
-			return nil, err
+	return func(network, password string, conn connpkg.ICtxConn) (connpkg.ICtxConn, error) {
+		if network == "tcp" {
+			return &streamConn{
+				ICtxConn:      conn,
+				IStreamCipher: c,
+				key:           evpBytesToKey(password, c.KeyLen()),
+			}, nil
+		} else {
+			return &streamPocketConn{
+				ICtxConn:      conn,
+				IStreamCipher: c,
+				key:           evpBytesToKey(password, c.KeyLen()),
+				writeBuffer:   bytes.NewBuffer(pool.GetBuf()[:0]),
+				readBuffer:    bytes.NewBuffer(pool.GetBuf()[:0]),
+			}, nil
 		}
-		sc := &streamConn{
-			ICtxConn:      conn,
-			IStreamCipher: c,
-			key:           evpBytesToKey(password, c.KeyLen()),
-		}
-		var err error
-		sc.Encrypter, err = sc.NewEncrypter(sc.key, iv)
-		_, err = conn.Write(iv)
-		return sc, err
 	}
 }
 
@@ -83,6 +87,20 @@ func (s *streamConn) Read(b []byte) (n int, err error) {
 }
 
 func (s *streamConn) Write(b []byte) (n int, err error) {
+	if s.Encrypter == nil {
+		var err error
+		iv := make([]byte, s.IVLen())
+		if _, err := io.ReadFull(rand.Reader, iv); err != nil {
+			return 0, errors.Errorf("[ss] init iv failed: %s", err.Error())
+		}
+		if s.Encrypter, err = s.NewEncrypter(s.key, iv); err != nil {
+			return 0, errors.Errorf("[ss] init encrypter failed: %s", err.Error())
+		}
+		_, err = s.ICtxConn.Write(iv)
+		if err != nil {
+			return 0, errors.Errorf("[ss] send salt failed: %s", err.Error())
+		}
+	}
 	buf := pool.GetBuf()
 	if len(buf) < len(b) {
 		pool.PutBuf(buf)

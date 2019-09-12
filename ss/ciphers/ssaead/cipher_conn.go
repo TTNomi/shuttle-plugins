@@ -8,6 +8,7 @@ import (
 	"crypto/sha1"
 	"io"
 
+	"github.com/pkg/errors"
 	"github.com/sipt/shuttle/pkg/pool"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/crypto/hkdf"
@@ -21,28 +22,33 @@ func registerAEADCiphers(method string, c IAEADCipher) {
 	aeadCiphers[method] = c
 }
 
-func GetAEADCiphers(method string) func(string, connpkg.ICtxConn) (connpkg.ICtxConn, error) {
+func GetAEADCiphers(method string) func(string, string, connpkg.ICtxConn) (connpkg.ICtxConn, error) {
 	c, ok := aeadCiphers[method]
 	if !ok {
 		return nil
 	}
-	return func(password string, conn connpkg.ICtxConn) (connpkg.ICtxConn, error) {
-		salt := make([]byte, c.SaltSize())
-		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
-			return nil, err
+	return func(network, password string, conn connpkg.ICtxConn) (connpkg.ICtxConn, error) {
+		if network == "tcp" {
+			return &aeadConn{
+				ICtxConn:    conn,
+				IAEADCipher: c,
+				key:         evpBytesToKey(password, c.KeySize()),
+				wNonce:      make([]byte, c.NonceSize()),
+				rNonce:      make([]byte, c.NonceSize()),
+				readBuffer:  bytes.NewBuffer(pool.GetBuf()[:0]),
+				writeBuffer: bytes.NewBuffer(pool.GetBuf()[:0]),
+			}, nil
+		} else {
+			return &aeadPocketConn{
+				ICtxConn:    conn,
+				IAEADCipher: c,
+				key:         evpBytesToKey(password, c.KeySize()),
+				wNonce:      make([]byte, c.NonceSize()),
+				rNonce:      make([]byte, c.NonceSize()),
+				readBuffer:  bytes.NewBuffer(pool.GetBuf()[:0]),
+				writeBuffer: bytes.NewBuffer(pool.GetBuf()[:0]),
+			}, nil
 		}
-		sc := &aeadConn{
-			ICtxConn:    conn,
-			IAEADCipher: c,
-			key:         evpBytesToKey(password, c.KeySize()),
-			wNonce:      make([]byte, c.NonceSize()),
-			rNonce:      make([]byte, c.NonceSize()),
-			readBuffer:  bytes.NewBuffer(pool.GetBuf()[:0]),
-		}
-		var err error
-		sc.Encrypter, err = sc.NewEncrypter(sc.key, salt)
-		_, err = conn.Write(salt)
-		return sc, err
 	}
 }
 
@@ -59,12 +65,17 @@ type IAEADCipher interface {
 type aeadConn struct {
 	connpkg.ICtxConn
 	IAEADCipher
-	key        []byte
-	rNonce     []byte
-	wNonce     []byte
-	readBuffer *bytes.Buffer
-	Encrypter  cipher.AEAD
-	Decrypter  cipher.AEAD
+	key         []byte
+	rNonce      []byte
+	wNonce      []byte
+	readBuffer  *bytes.Buffer
+	writeBuffer *bytes.Buffer
+	Encrypter   cipher.AEAD
+	Decrypter   cipher.AEAD
+}
+
+func (a *aeadConn) PrepareWrite(b []byte) (n int, err error) {
+	return a.writeBuffer.Write(b)
 }
 
 func (a *aeadConn) Read(b []byte) (n int, err error) {
@@ -119,13 +130,26 @@ func (a *aeadConn) Read(b []byte) (n int, err error) {
 }
 
 func (a *aeadConn) Write(b []byte) (n int, err error) {
-	r := bytes.NewBuffer(b)
+	a.writeBuffer.Write(b)
+	if a.Encrypter == nil {
+		salt := make([]byte, a.SaltSize())
+		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+			return 0, errors.Errorf("[ss] init salt failed: %s", err.Error())
+		}
+		if a.Encrypter, err = a.NewEncrypter(a.key, salt); err != nil {
+			return 0, errors.Errorf("[ss] init encrypter failed: %s", err.Error())
+		}
+		_, err = a.ICtxConn.Write(salt)
+		if err != nil {
+			return 0, errors.Errorf("[ss] send salt failed: %s", err.Error())
+		}
+	}
 	var rn int
 	var overHead = a.Encrypter.Overhead()
 	for {
 		buf := make([]byte, 2+overHead+DataMaxSize+overHead)
 		dataBuf := buf[2+overHead : 2+overHead+DataMaxSize]
-		rn, err = r.Read(dataBuf)
+		rn, err = a.writeBuffer.Read(dataBuf)
 		if err != nil {
 			if err == io.EOF {
 				err = nil

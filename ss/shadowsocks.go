@@ -121,13 +121,13 @@ func (s *ssServer) Dial(ctx context.Context, network string, info server.Info, d
 		return nil, errors.Wrapf(err, "[ss] dial [%s] to server{domain:%s, ip:%s, port:%d} failed",
 			network, info.Domain(), info.IP(), info.Port())
 	}
-	if s.obfsFunc != nil {
+	if network != "udp" && s.obfsFunc != nil {
 		sc, err = s.obfsFunc(sc)
 		if err != nil {
 			return nil, errors.Wrapf(err, "[ss:%s] wrap obfs failed", s.name)
 		}
 	}
-	sc, err = ciphers.CipherDecorate(s.password, s.method, sc)
+	sc, err = ciphers.CipherDecorate(network, s.password, s.method, sc)
 	if err != nil {
 		return nil, errors.Wrapf(err, "[ss] decorate cipher[%s] failed", s.method)
 	}
@@ -143,7 +143,7 @@ func (s *ssServer) dialTCP(ctx context.Context, network, host, port string, dial
 }
 
 func (s *ssServer) dialUDP(ctx context.Context, network, host, port string, dial conn.DialFunc) (conn.ICtxConn, error) {
-	return nil, nil
+	return dial(ctx, network, host, port)
 }
 
 // MarshalAddr
