@@ -27,7 +27,7 @@ const (
 
 	ParamsKeyExpire      = "expire"
 	ParamsKeyInternalTyp = "internal_typ"
-	ParamsKeyTestURI     = "test_url"
+	ParamsKeyTestURI     = "test-url"
 	ParamsKeyAPIPath     = "api_path"
 	ParamsKeyAPIMethod   = "api_method"
 

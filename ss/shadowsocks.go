@@ -22,6 +22,7 @@ const (
 	ssKeyMethod   = "method"
 	ssKeyPassword = "password"
 	ssKeyObfsTyp  = "obfs"
+	ssKeyUdpRelay = "udp-relay"
 )
 
 func init() {
@@ -52,6 +53,7 @@ func newSsServer(name, addr string, port int, params map[string]string, dnsHandl
 			return nil, errors.Wrapf(e, "server [typ:ss] [name:%s] init obfs failed", name)
 		}
 	}
+	ss.udpRelay = params[ssKeyUdpRelay] == "true"
 	return ss, nil
 }
 
@@ -71,6 +73,7 @@ type ssServer struct {
 	method    string
 	password  string
 	obfsFunc  obfs.HandleFunc
+	udpRelay  bool
 }
 
 func (s *ssServer) Typ() string {
@@ -89,8 +92,13 @@ func (s *ssServer) Rtt(key string) time.Duration {
 	defer s.RUnlock()
 	return s.rtt[key]
 }
-
+func (s *ssServer) UdpRelay() bool {
+	return s.udpRelay
+}
 func (s *ssServer) Dial(ctx context.Context, network string, info server.Info, dial conn.DialFunc) (conn.ICtxConn, error) {
+	if network == "udp" && !s.udpRelay {
+		return nil, errors.Errorf("[ss:%s] not support udp", s.name)
+	}
 	rawAddr, err := MarshalAddr(info.Domain(), info.IP(), info.Port())
 	if err != nil {
 		return nil, errors.Wrapf(err, "[ss] format addr failed, {domain:%s, ip:%s, port:%d}",
@@ -104,14 +112,7 @@ func (s *ssServer) Dial(ctx context.Context, network string, info server.Info, d
 		s_host = s.ip.String()
 	}
 	var sc conn.ICtxConn
-	switch network {
-	case "tcp":
-		sc, err = s.dialTCP(ctx, network, s_host, strconv.Itoa(s.port), dial)
-	case "udp":
-		sc, err = s.dialUDP(ctx, network, s_host, strconv.Itoa(s.port), dial)
-	default:
-		return nil, errors.Errorf("[ss] not support network: %s", network)
-	}
+	sc, err = dial(ctx, network, s_host, strconv.Itoa(s.port))
 	defer func() {
 		if err != nil && sc != nil {
 			_ = sc.Close()
