@@ -1,4 +1,4 @@
-package main
+package policy_path
 
 import (
 	"bufio"
@@ -26,10 +26,10 @@ const (
 	TypDler = "include"
 
 	ParamsKeyExpire      = "expire"
-	ParamsKeyInternalTyp = "internal_typ"
+	ParamsKeyInternalTyp = "internal-typ"
 	ParamsKeyTestURI     = "test-url"
-	ParamsKeyAPIPath     = "api_path"
-	ParamsKeyAPIMethod   = "api_method"
+	ParamsKeyAPIPath     = "api-path"
+	ParamsKeyAPIMethod   = "api-method"
 
 	DefaultExpireSec = 600 * time.Second
 	DefaultTestURL   = "http://www.gstatic.com/generate_204"

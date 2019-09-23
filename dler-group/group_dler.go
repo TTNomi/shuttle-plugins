@@ -1,4 +1,4 @@
-package main
+package dler_group
 
 import (
 	"context"
@@ -23,10 +23,10 @@ const (
 	TypDler = "dler-ss"
 
 	ParamsKeyExpireSec   = "expire_sec"
-	ParamsKeyInternalTyp = "internal_typ"
+	ParamsKeyInternalTyp = "internal-typ"
 	ParamsKeyTestURI     = "test-url"
-	ParamsKeyAPIPath     = "api_path"
-	ParamsKeyAPIMethod   = "api_method"
+	ParamsKeyAPIPath     = "api-path"
+	ParamsKeyAPIMethod   = "api-method"
 
 	DefaultExpireSec = 600 * time.Second
 	DefaultTestURL   = "http://www.gstatic.com/generate_204"
