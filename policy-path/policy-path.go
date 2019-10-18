@@ -44,8 +44,6 @@ func ApplyConfig(_ map[string]string) error {
 }
 
 func newDlerGroup(ctx context.Context, name string, params map[string]string, dnsHandle dns.Handle) (g group.IGroup, err error) {
-	logrus.WithField("type", TypDler).WithField("group", name).Info("loading ...")
-	defer logrus.WithField("type", TypDler).WithField("group", name).Info("load success")
 	dg := &dlerGroup{
 		RWMutex:   &sync.RWMutex{},
 		dnsHandle: dnsHandle,
@@ -84,12 +82,11 @@ func newDlerGroup(ctx context.Context, name string, params map[string]string, dn
 	if err != nil {
 		return nil, fmt.Errorf("[group: %s] make request failed: %s", name, err.Error())
 	}
-	err = dg.refresh()
-	if err != nil {
-		return nil, fmt.Errorf("[group: %s] download server config failed: %s", name, err.Error())
-	}
+	ds, _ := server.Get(server.Direct, "", "", 0, nil, nil)
+	ds = server.NewRttServer(ds, map[string]string{server.ParamsKeyTestURI: dg.testUrl})
+	dg.IGroup.Append([]group.IServerX{group.WrapServer(ds)})
 	go func() {
-		timer := time.NewTimer(expire)
+		timer := time.NewTimer(0)
 		for {
 			select {
 			case <-timer.C:
@@ -97,11 +94,13 @@ func newDlerGroup(ctx context.Context, name string, params map[string]string, dn
 				logrus.Infof("[group: %s] auto update servers stopped", name)
 				return
 			}
+			logrus.WithField("type", TypDler).WithField("group", name).Info("loading ...")
 			err := dg.refresh()
 			if err != nil {
 				logrus.Errorf("[group: %s] auto update servers failed: %s", name, err.Error())
 			}
 			timer.Reset(expire)
+			logrus.WithField("type", TypDler).WithField("group", name).Info("load success")
 		}
 	}()
 	return dg, nil
