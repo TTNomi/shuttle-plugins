@@ -3,6 +3,7 @@ package dler_group
 import (
 	"context"
 	"crypto/md5"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -11,6 +12,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/sipt/shuttle/constant/typ"
 
 	"github.com/pkg/errors"
 	"github.com/sipt/shuttle/dns"
@@ -30,19 +33,22 @@ const (
 
 	DefaultExpireSec = 600 * time.Second
 	DefaultTestURL   = "http://www.gstatic.com/generate_204"
+
+	CacheKey = "response"
 )
 
 func init() {
 	group.Register(TypDler, newDlerGroup)
 }
 
-func newDlerGroup(ctx context.Context, name string, params map[string]string, dnsHandle dns.Handle) (g group.IGroup, err error) {
+func newDlerGroup(ctx context.Context, runtime typ.Runtime, name string, params map[string]string, dnsHandle dns.Handle) (g group.IGroup, err error) {
 	dg := &dlerGroup{
 		RWMutex:   &sync.RWMutex{},
 		dnsHandle: dnsHandle,
+		runtime:   runtime,
 	}
 	internalTyp := params[ParamsKeyInternalTyp]
-	dg.IGroup, err = group.Get(ctx, internalTyp, name, params, dnsHandle)
+	dg.IGroup, err = group.Get(ctx, internalTyp, runtime, name, params, dnsHandle)
 	if err != nil {
 		return nil, errors.Errorf("[group:%s] init failed: %s", name, err.Error())
 	}
@@ -104,13 +110,31 @@ type dlerGroup struct {
 	req       *http.Request
 	dnsHandle dns.Handle
 	testUrl   string
+	runtime   typ.Runtime
 	*sync.RWMutex
 }
 
 func (d *dlerGroup) refresh() error {
 	d.Lock()
 	defer d.Unlock()
-	data, err := downloadGroup(d.req)
+	var (
+		data []byte
+		err  error
+	)
+	if len(d.hash) == 0 {
+		// load cache
+		resp, ok := d.runtime.Get(CacheKey).(string)
+		if ok {
+			data, _ = base64.StdEncoding.DecodeString(resp)
+		}
+	}
+	if len(data) == 0 {
+		logrus.WithField("group", d.Name()).Info("cache miss")
+		data, err = downloadGroup(d.req)
+	} else {
+		logrus.WithField("group", d.Name()).Info("cache found")
+		go d.refresh()
+	}
 	if err != nil {
 		return errors.Errorf("[%s] download group failed: %s", d.Name(), err.Error())
 	}
@@ -120,6 +144,12 @@ func (d *dlerGroup) refresh() error {
 	if newHash == d.hash {
 		logrus.WithField("group", d.Name()).Info("group is up to date (no change)")
 		return nil
+	}
+	if len(d.hash) != 0 {
+		err = d.runtime.Set(CacheKey, base64.StdEncoding.EncodeToString(data))
+		if err != nil {
+			logrus.WithError(err).WithField("group", d.Name()).Error("save cache failed")
+		}
 	}
 	d.hash = newHash
 	items, err := unmarshal(data)

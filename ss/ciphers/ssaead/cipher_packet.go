@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/cipher"
 	"crypto/rand"
-	"fmt"
 	"io"
 
 	"github.com/pkg/errors"
@@ -80,7 +79,6 @@ func (a *aeadPocketConn) Write(b []byte) (n int, err error) {
 	if err != nil {
 		return
 	}
-	fmt.Println(a.writeBuffer.Bytes())
 	a.Encrypter.Seal(buf[a.SaltSize():a.SaltSize()], a.wNonce, a.writeBuffer.Bytes(), nil)
 	_, err = a.ICtxConn.Write(buf)
 	if err != nil {
