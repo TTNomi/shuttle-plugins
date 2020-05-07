@@ -39,10 +39,17 @@ func NewConn(wc net.Conn, dest *Destination, account *Account) (*Conn, error) {
 	conn.idHash = DefaultIDHash
 	switch account.Security {
 	case SecurityType_AUTO, SecurityType_AES128_GCM:
-		conn.Conn, err = crypto.GetAEADCiphers("aes-128-gcm")(conn.requestBodyIV[:], conn.responseBodyIV[:], wc)
+		fmt.Println(conn.requestBodyIV)
+		conn.Conn, err = crypto.GetAEADCiphers("aes-128-gcm")(clone(conn.requestBodyKey[:]), clone(conn.requestBodyIV[:]), wc)
 	case SecurityType_CHACHA20_POLY1305:
 	}
 	return conn, err
+}
+
+func clone(in []byte) []byte {
+	out := make([]byte, len(in))
+	copy(out, in)
+	return out
 }
 
 type Conn struct {
@@ -65,7 +72,7 @@ func (c *Conn) sendRequestHeader() error {
 	if err != nil {
 		return err
 	}
-	_, err = c.Write(h.Sum(nil))
+	_, err = c.plain.Write(h.Sum(nil))
 	if err != nil {
 		return err
 	}

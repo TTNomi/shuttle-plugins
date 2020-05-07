@@ -32,7 +32,7 @@ func Test(t *testing.T) {
 
 	protoID := NewID(id)
 	sc, err := NewConn(conn, &Destination{
-		Address: DomainAddress("www.github.com"),
+		Address: DomainAddress("www.baidu.com"),
 		Port:    80,
 		Network: Network_TCP,
 	}, &Account{
@@ -49,7 +49,7 @@ func Test(t *testing.T) {
 		panic(err)
 	}
 
-	_, err = sc.Write([]byte("GET http://www.github.com/ HTTP/1.1\r\n\r\n"))
+	_, err = sc.Write([]byte("GET http://www.baidu.com/ HTTP/1.1\r\n\r\n"))
 	if err != nil {
 		panic(err)
 	}

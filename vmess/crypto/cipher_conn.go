@@ -5,9 +5,8 @@ import (
 	"crypto/cipher"
 	"encoding/binary"
 	"fmt"
-	"net"
-
 	"github.com/sipt/shuttle/pkg/pool"
+	"net"
 )
 
 //var aeadCiphers = make(map[string]IAEADCipher)
@@ -80,16 +79,16 @@ func (a *aeadConn) Write(b []byte) (n int, err error) {
 	payloadSize := pool.BufferSize - a.Overhead() - 2
 	rawBytes := pool.GetBuf()
 	defer pool.PutBuf(rawBytes)
-	nBytes := 0
+	chunkSize := 0
 	for {
-		b, nBytes = splitBytes(b, rawBytes)
-
-		binary.BigEndian.PutUint16(rawBytes[:2], uint16(nBytes+a.Overhead()))
+		b, chunkSize = splitBytes(b, rawBytes[2: payloadSize])
+		binary.BigEndian.PutUint16(rawBytes[:2], uint16(chunkSize+a.Overhead()))
 		binary.BigEndian.PutUint16(a.wNonce[:2], a.wCount)
 
-		a.Seal(rawBytes[:0], a.wNonce[:a.NonceSize()], rawBytes[:payloadSize], nil)
+		fmt.Println(rawBytes[:2+chunkSize+a.Overhead()])
+		a.Seal(rawBytes[:0], a.wNonce[:a.NonceSize()], rawBytes[:chunkSize], nil)
 		a.wCount++
-		_, err = a.Conn.Write(rawBytes[:2+nBytes+a.Overhead()])
+		_, err = a.Conn.Write(rawBytes[:2+chunkSize+a.Overhead()])
 		if err != nil {
 			return 0, err
 		}
