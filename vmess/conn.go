@@ -7,9 +7,10 @@ import (
 	"crypto/md5"
 	"crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"hash/fnv"
 	"net"
+
+	"github.com/pkg/errors"
 
 	"github.com/sipt/shuttle/plugins/vmess/crypto"
 )
@@ -39,8 +40,8 @@ func NewConn(wc net.Conn, dest *Destination, account *Account) (*Conn, error) {
 	conn.idHash = DefaultIDHash
 	switch account.Security {
 	case SecurityType_AUTO, SecurityType_AES128_GCM:
-		fmt.Println(conn.requestBodyIV)
-		conn.Conn, err = crypto.GetAEADCiphers("aes-128-gcm")(clone(conn.requestBodyKey[:]), clone(conn.requestBodyIV[:]), wc)
+		conn.Conn, err = crypto.GetAEADCiphers("aes-128-gcm")(
+			clone(conn.requestBodyKey[:]), clone(conn.responseBodyKey[:]), clone(conn.requestBodyIV[:]), clone(conn.responseBodyIV[:]), wc)
 	case SecurityType_CHACHA20_POLY1305:
 	}
 	return conn, err
@@ -129,16 +130,35 @@ func (c *Conn) sendRequestHeader() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(string(buffer.Bytes()))
-	fmt.Println(buffer.Bytes())
 	aesStream := cipher.NewCFBEncrypter(aesBlock, iv[:])
 	aesStream.XORKeyStream(buffer.Bytes(), buffer.Bytes())
 	_, err = c.plain.Write(buffer.Bytes())
 	return err
 }
 
-func (c *Conn) Write(b []byte) (n int, err error) {
-	return c.Conn.Write(b)
+func (c *Conn) receiveResponseHeader() error {
+	aesBlock, err := aes.NewCipher(c.responseBodyKey[:])
+	if err != nil {
+		return err
+	}
+
+	aseStream := cipher.NewCFBDecrypter(aesBlock, c.responseBodyIV[:])
+	buf := make([]byte, 4)
+	_, err = c.plain.Read(buf)
+	if err != nil {
+		return err
+	}
+	aseStream.XORKeyStream(buf, buf[:4])
+
+	switch {
+	case buf[0] != c.responseHeader:
+		return errors.New("invalid response header")
+	case buf[2] != 0:
+		return errors.New("not support [Dynamic-Port]")
+	default:
+		break
+	}
+	return nil
 }
 
 func hashTimestamp(t int64) []byte {
