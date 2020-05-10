@@ -8,10 +8,14 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"hash/fnv"
+	"io"
 	"net"
+
+	"github.com/sirupsen/logrus"
 
 	"github.com/pkg/errors"
 
+	"github.com/sipt/shuttle/conn"
 	"github.com/sipt/shuttle/plugins/vmess/crypto"
 )
 
@@ -20,7 +24,7 @@ const (
 )
 
 // NewClientSession creates a new ClientSession.
-func NewConn(wc net.Conn, dest *Destination, account *Account) (*Conn, error) {
+func NewConn(wc conn.ICtxConn, dest *Destination, account *Account) (conn.ICtxConn, error) {
 	randomBytes := make([]byte, 33) // 16 + 16 + 1
 	_, err := rand.Read(randomBytes)
 	if err != nil {
@@ -28,22 +32,20 @@ func NewConn(wc net.Conn, dest *Destination, account *Account) (*Conn, error) {
 	}
 
 	conn := &Conn{
-		plain:   wc,
-		dest:    dest,
-		account: account,
+		plain:      wc,
+		dest:       dest,
+		account:    account,
+		firstRead:  true,
+		firstWrite: true,
 	}
 	copy(conn.requestBodyKey[:], randomBytes[:16])
 	copy(conn.requestBodyIV[:], randomBytes[16:32])
 	conn.responseHeader = randomBytes[32]
+	conn.idHash = DefaultIDHash
 	conn.responseBodyKey = md5.Sum(conn.requestBodyKey[:])
 	conn.responseBodyIV = md5.Sum(conn.requestBodyIV[:])
-	conn.idHash = DefaultIDHash
-	switch account.Security {
-	case SecurityType_AUTO, SecurityType_AES128_GCM:
-		conn.Conn, err = crypto.GetAEADCiphers("aes-128-gcm")(
-			clone(conn.requestBodyKey[:]), clone(conn.responseBodyKey[:]), clone(conn.requestBodyIV[:]), clone(conn.responseBodyIV[:]), wc)
-	case SecurityType_CHACHA20_POLY1305:
-	}
+	conn.ICtxConn, err = crypto.GetAEADCiphers(account.Security)(
+		clone(conn.requestBodyKey[:]), clone(conn.responseBodyKey[:]), clone(conn.requestBodyIV[:]), clone(conn.responseBodyIV[:]), wc)
 	return conn, err
 }
 
@@ -53,8 +55,13 @@ func clone(in []byte) []byte {
 	return out
 }
 
+const (
+	RequestCommandTCP = byte(0x01)
+	RequestCommandUDP = byte(0x02)
+)
+
 type Conn struct {
-	net.Conn
+	conn.ICtxConn
 	plain           net.Conn
 	dest            *Destination
 	idHash          IDHash
@@ -64,6 +71,8 @@ type Conn struct {
 	responseBodyIV  [16]byte
 	responseHeader  byte
 	account         *Account
+	firstRead       bool
+	firstWrite      bool
 }
 
 func (c *Conn) sendRequestHeader() error {
@@ -83,12 +92,12 @@ func (c *Conn) sendRequestHeader() error {
 	buffer.Write(c.requestBodyIV[:])
 	buffer.Write(c.requestBodyKey[:])
 	buffer.WriteByte(c.responseHeader)
-	buffer.WriteByte(RequestOptionChunkStream)
+	buffer.WriteByte(0x01)
 
 	paddingLen := Roll(16)
 	buffer.WriteByte(byte(paddingLen<<4) | byte(c.account.Security))
 	buffer.WriteByte(0)
-	if c.dest.Network == Network_TCP {
+	if c.dest.Network == "tcp" {
 		buffer.WriteByte(RequestCommandTCP)
 	} else {
 		buffer.WriteByte(RequestCommandUDP)
@@ -125,6 +134,7 @@ func (c *Conn) sendRequestHeader() error {
 		buffer.Write(fnv1a.Sum(nil))
 	}
 
+	logrus.WithField("send_header", string(buffer.Bytes())).Debug("[vmess] send header")
 	iv := hashTimestamp(timestamp)
 	aesBlock, err := aes.NewCipher(c.account.ID.CmdKey())
 	if err != nil {
@@ -144,7 +154,7 @@ func (c *Conn) receiveResponseHeader() error {
 
 	aseStream := cipher.NewCFBDecrypter(aesBlock, c.responseBodyIV[:])
 	buf := make([]byte, 4)
-	_, err = c.plain.Read(buf)
+	_, err = io.ReadFull(c.plain, buf)
 	if err != nil {
 		return err
 	}
@@ -159,6 +169,28 @@ func (c *Conn) receiveResponseHeader() error {
 		break
 	}
 	return nil
+}
+
+func (c *Conn) Read(b []byte) (n int, err error) {
+	if c.firstRead {
+		c.firstRead = false
+		err = c.receiveResponseHeader()
+		if err != nil {
+			return 0, err
+		}
+	}
+	return c.ICtxConn.Read(b)
+}
+
+func (c *Conn) Write(b []byte) (n int, err error) {
+	if c.firstWrite {
+		c.firstWrite = false
+		err = c.sendRequestHeader()
+		if err != nil {
+			return 0, err
+		}
+	}
+	return c.ICtxConn.Write(b)
 }
 
 func hashTimestamp(t int64) []byte {

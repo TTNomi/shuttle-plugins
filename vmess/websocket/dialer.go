@@ -2,46 +2,54 @@ package websocket
 
 import (
 	"context"
-	"fmt"
+	"crypto/tls"
 	"net"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/sipt/shuttle/plugins/vmess"
+	"github.com/pkg/errors"
+	"github.com/sipt/shuttle/conn"
 )
 
-func DialWebsocket(ctx context.Context, path string, header http.Header, dest vmess.Destination, useTLS bool) (net.Conn, error) {
+func DialWebsocket(ctx context.Context, protocol, path string, header http.Header, addr, port string, dial conn.DialFunc) (conn.ICtxConn, error) {
+	if port == "" || port == "0" {
+		switch protocol {
+		case "ws":
+			port = "80"
+		case "wss":
+			port = "443"
+		}
+	}
+
+	uri := protocol + "://" + net.JoinHostPort(addr, port) + path
+	var scCtx conn.ICtxConn
 	dialer := &websocket.Dialer{
-		NetDial: func(network, addr string) (net.Conn, error) {
-			return net.Dial(dest.Network.SystemString(), dest.NetAddr())
+		NetDialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			var err error
+			scCtx, err = dial(ctx, network, addr, port)
+			return scCtx, err
 		},
 		ReadBufferSize:   4 * 1024,
 		WriteBufferSize:  4 * 1024,
 		HandshakeTimeout: time.Second * 8,
 	}
 
-	protocol := "ws"
-
-	//if config := tls.ConfigFromStreamSettings(streamSettings); config != nil {
-	//	protocol = "wss"
-	//	dialer.TLSClientConfig = config.GetTLSConfig(tls.WithDestination(dest))
-	//}
-
-	host := dest.NetAddr()
-	if (protocol == "ws" && dest.Port == 80) || (protocol == "wss" && dest.Port == 443) {
-		host = dest.Address.String()
+	if protocol == "wss" {
+		dialer.TLSClientConfig = &tls.Config{
+			InsecureSkipVerify: true,
+		}
 	}
-	uri := protocol + "://" + host + path
 
-	conn, resp, err := dialer.Dial(uri, header)
+	wc, resp, err := dialer.DialContext(ctx, uri, header)
 	if err != nil {
 		var reason string
 		if resp != nil {
 			reason = resp.Status
 		}
-		return nil, fmt.Errorf("failed to dial to (%s): %s, err: %s", uri, reason, err.Error())
+		return nil, errors.Wrapf(err, "failed to dial to (%s): %s", uri, reason)
 	}
 
-	return newConnection(conn, conn.RemoteAddr()), nil
+	c := newConnection(wc, wc.RemoteAddr())
+	return conn.NewConn(c, scCtx), nil
 }

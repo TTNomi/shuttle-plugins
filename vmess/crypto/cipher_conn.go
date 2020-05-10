@@ -3,12 +3,15 @@ package crypto
 import (
 	"bytes"
 	"crypto/cipher"
+	"crypto/md5"
 	"encoding/binary"
 	"fmt"
-	"net"
+
+	"github.com/sipt/shuttle/plugins/vmess/common"
+
+	"github.com/sipt/shuttle/conn"
 
 	"github.com/pkg/errors"
-
 	"github.com/sipt/shuttle/pkg/pool"
 )
 
@@ -18,12 +21,12 @@ import (
 //	aeadCiphers[method] = c
 //}
 
-func GetAEADCiphers(method string) func(reqKey, respKey, reqIV, respIV []byte, conn net.Conn) (net.Conn, error) {
-	return func(reqKey, respKey, reqIV, respIV []byte, conn net.Conn) (net.Conn, error) {
+func GetAEADCiphers(method common.SecurityType) func(reqKey, respKey, reqIV, respIV []byte, conn conn.ICtxConn) (conn.ICtxConn, error) {
+	return func(reqKey, respKey, reqIV, respIV []byte, conn conn.ICtxConn) (conn.ICtxConn, error) {
 		var (
 			err error
 			c   = &aeadConn{
-				Conn:        conn,
+				ICtxConn:    conn,
 				readBuffer:  bytes.NewBuffer(pool.GetBuf()[:0]),
 				writeBuffer: bytes.NewBuffer(pool.GetBuf()[:0]),
 				wCipher: &aeadCipher{
@@ -34,8 +37,9 @@ func GetAEADCiphers(method string) func(reqKey, respKey, reqIV, respIV []byte, c
 				},
 			}
 		)
+
 		switch method {
-		case "aes-128-gcm":
+		case common.SecurityType_AES128_GCM:
 			c.wCipher.AEAD, err = NewAesGcm(reqKey)
 			if err != nil {
 				return nil, err
@@ -44,12 +48,12 @@ func GetAEADCiphers(method string) func(reqKey, respKey, reqIV, respIV []byte, c
 			if err != nil {
 				return nil, err
 			}
-		case "chacha20-poly1305":
-			c.wCipher.AEAD, err = NewChacha20(reqKey)
+		case common.SecurityType_CHACHA20_POLY1305:
+			c.wCipher.AEAD, err = NewChacha20(makeKey(reqKey))
 			if err != nil {
 				return nil, err
 			}
-			c.rCipher.AEAD, err = NewChacha20(respKey)
+			c.rCipher.AEAD, err = NewChacha20(makeKey(respKey))
 			if err != nil {
 				return nil, err
 			}
@@ -76,6 +80,15 @@ func GetAEADCiphers(method string) func(reqKey, respKey, reqIV, respIV []byte, c
 	}
 }
 
+func makeKey(in []byte) []byte {
+	reply := make([]byte, 32)
+	key := md5.Sum(in)
+	copy(reply, key[:])
+	key = md5.Sum(key[:])
+	copy(reply[16:], key[:])
+	return reply
+}
+
 type aeadCipher struct {
 	cipher.AEAD
 	count uint16
@@ -97,7 +110,7 @@ func (a *aeadCipher) Open(dst, ciphertext, additionalData []byte) ([]byte, error
 }
 
 type aeadConn struct {
-	net.Conn
+	conn.ICtxConn
 	readBuffer  *bytes.Buffer
 	writeBuffer *bytes.Buffer
 	wCipher     *aeadCipher
@@ -116,7 +129,7 @@ func (a *aeadConn) Read(b []byte) (n int, err error) {
 	buf := pool.GetBuf()
 	defer pool.PutBuf(buf)
 
-	n, err = a.Conn.Read(buf)
+	n, err = a.ICtxConn.Read(buf)
 	if err != nil {
 		return 0, errors.Wrap(err, "read payload_size failed")
 	}
@@ -124,14 +137,15 @@ func (a *aeadConn) Read(b []byte) (n int, err error) {
 	payloadSize := int(binary.BigEndian.Uint16(buf[:2]))
 	if n > 2 {
 		a.readBuffer.Write(buf[2:n])
-		payloadSize -= n
+		payloadSize -= n - 2
 	}
 	for payloadSize > 0 {
 		chunkSize := payloadSize
 		if chunkSize > pool.BufferSize {
 			chunkSize = pool.BufferSize
 		}
-		n, err = a.Conn.Read(buf[:chunkSize])
+
+		n, err = a.ICtxConn.Read(buf[:chunkSize])
 		if err != nil {
 			return 0, errors.Wrap(err, "read payload failed")
 		}
@@ -168,7 +182,7 @@ func (a *aeadConn) Write(b []byte) (n int, err error) {
 		binary.BigEndian.PutUint16(rawBytes[:2], uint16(chunkSize+a.wCipher.Overhead()))
 
 		a.wCipher.Seal(payloadBytes[:0], payloadBytes[:chunkSize], nil)
-		_, err = a.Conn.Write(rawBytes[:2+chunkSize+a.wCipher.Overhead()])
+		_, err = a.ICtxConn.Write(rawBytes[:2+chunkSize+a.wCipher.Overhead()])
 		if err != nil {
 			return 0, err
 		}

@@ -17,7 +17,7 @@ type connection struct {
 	remoteAddr net.Addr
 }
 
-func newConnection(conn *websocket.Conn, remoteAddr net.Addr) *connection {
+func newConnection(conn *websocket.Conn, remoteAddr net.Addr) net.Conn {
 	return &connection{
 		conn:       conn,
 		remoteAddr: remoteAddr,

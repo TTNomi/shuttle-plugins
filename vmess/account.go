@@ -6,6 +6,8 @@ import (
 	"hash"
 	"math/rand"
 
+	"github.com/sipt/shuttle/plugins/vmess/common"
+
 	"github.com/google/uuid"
 )
 
@@ -20,7 +22,7 @@ type Account struct {
 	// AlterIDs are the alternative IDs of the account.
 	AlterIDs []*ID
 	// Security type of the account. Used for client connections.
-	Security SecurityType
+	Security common.SecurityType
 }
 
 // AnyValidID returns an ID that is either the main ID or one of the alternative IDs if any.
