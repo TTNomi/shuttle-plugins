@@ -10,12 +10,12 @@ const (
 
 var SecurityType_name = map[SecurityType]string{
 	2: "auto",
-	3: "aes128_gcm",
-	4: "chacha20_poly1305",
+	3: "aes128-gcm",
+	4: "chacha20-poly1305",
 }
 
 var SecurityType_value = map[string]SecurityType{
 	"auto":              2,
-	"aes128_gcm":        3,
-	"chacha20_poly1305": 4,
+	"aes128-gcm":        3,
+	"chacha20-poly1305": 4,
 }

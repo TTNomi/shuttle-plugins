@@ -65,6 +65,8 @@ func newVMessServer(name, addr string, port int, params map[string]string, dnsHa
 			} else {
 				vmess.method = common.SecurityType_CHACHA20_POLY1305
 			}
+		} else {
+			return nil, errors.Errorf("server [typ:vmess] [name:%s] not support [method: %s]", name, method)
 		}
 	}
 	if vmess.path, ok = params[KeyPath]; !ok || len(vmess.path) == 0 {
