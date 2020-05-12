@@ -10,12 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/sipt/shuttle/plugins/vmess/common"
-
 	"github.com/google/uuid"
 	"github.com/pkg/errors"
 	"github.com/sipt/shuttle/conn"
 	"github.com/sipt/shuttle/dns"
+	"github.com/sipt/shuttle/plugins/vmess/common"
 	"github.com/sipt/shuttle/plugins/vmess/websocket"
 	"github.com/sipt/shuttle/server"
 	"github.com/sirupsen/logrus"
